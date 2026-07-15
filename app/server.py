@@ -17,9 +17,11 @@ import html
 import json
 import re
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import numpy as np
+import requests
 import uvicorn
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -29,7 +31,9 @@ import hopsworks
 DOSSIER_MODEL = "claude-sonnet-5"
 ASK_MODEL = "claude-sonnet-5"
 SHELF_K = 60
+SHELF_FIRST = 20  # cards visible before "five more"
 PROFILE_TTL = 900
+ALIVE_TTL = 6 * 3600  # repos die/rename after capture; recheck links this often
 
 state: dict = {}
 
@@ -59,6 +63,7 @@ def boot() -> None:
     state["row_by_id"] = {int(r): i for i, r in enumerate(df["repo_id"])}
     state["id_by_name"] = {n: int(i) for n, i in zip(df["full_name_lc"], df["repo_id"])}
 
+    state["alive"] = {}
     state["st"] = SentenceTransformer("all-MiniLM-L6-v2")
     state["claude"] = anthropic.Anthropic(
         api_key=hopsworks.get_secrets_api().get_secret("ANTHROPIC_API_KEY").value
@@ -89,9 +94,29 @@ def _rows(fg, hits) -> list[dict]:
     return out
 
 
+def alive_only(rows: list[dict]) -> list[dict]:
+    """Drop repos that 404 on github.com (deleted/renamed since capture)."""
+    now = time.time()
+    cache = state["alive"]
+    todo = [r["full_name"] for r in rows
+            if r["full_name"] not in cache or now - cache[r["full_name"]][0] > ALIVE_TTL]
+
+    def check(fn: str):
+        try:
+            resp = requests.head(f"https://github.com/{fn}", timeout=5, allow_redirects=True)
+            return fn, resp.status_code < 400
+        except requests.RequestException:
+            return fn, True  # network doubt: keep the card rather than blank the shelf
+    if todo:
+        with ThreadPoolExecutor(max_workers=16) as ex:
+            for fn, ok in ex.map(check, todo):
+                cache[fn] = (now, ok)
+    return [r for r in rows if cache[r["full_name"]][1]]
+
+
 def shelf_for(pred: dict, k: int = SHELF_K) -> list[dict]:
     starred = set(pred.get("starred_ids", []))
-    hits = _rows(state["emb_fg"], state["emb_fg"].find_neighbors(pred["user_vector"], k=k + len(starred) + 20))
+    hits = _rows(state["emb_fg"], state["emb_fg"].find_neighbors(pred["user_vector"], k=k + len(starred) + 40))
     rows = []
     for rec in hits:
         rid = int(rec["repo_id"])
@@ -102,9 +127,7 @@ def shelf_for(pred: dict, k: int = SHELF_K) -> list[dict]:
             "stars": int(rec["stars"]), "category": rec.get("category") or "",
             "pitch": rec.get("pitch") or "", "score": rec["score"],
         })
-        if len(rows) >= k:
-            break
-    return rows
+    return alive_only(rows)[:k]
 
 
 def text_search(query: str, k: int = 40) -> list[dict]:
@@ -316,12 +339,17 @@ button{background:var(--acc);color:#04110b;border:0;border-radius:8px;padding:10
 font-weight:600;cursor:pointer}
 .cols{display:grid;grid-template-columns:1fr 320px;gap:24px}
 @media(max-width:900px){.cols{grid-template-columns:1fr}}
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:14px}
 .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+.card .og{width:100%;aspect-ratio:2/1;object-fit:cover;border-radius:6px;margin-bottom:8px;
+background:#0f1720;border:1px solid var(--line)}
 .card .nm{font-weight:600}.card .meta{color:var(--dim);font-size:12.5px;margin-top:2px}
 .card .pitch{font-size:13.5px;margin-top:6px;color:#c8cdd4}
-.bar{height:3px;background:var(--line);border-radius:2px;margin-top:8px}
+.scorow{display:flex;align-items:center;gap:8px;margin-top:8px}
+.scorow .sc{color:var(--acc);font-size:12px;font-weight:600;min-width:34px;text-align:right}
+.bar{flex:1;height:3px;background:var(--line);border-radius:2px}
 .bar i{display:block;height:3px;background:var(--acc);border-radius:2px}
+#more{display:block;margin:18px auto 0}
 .panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px}
 .panel h3{margin:0 0 8px;font-size:14px;letter-spacing:.06em;text-transform:uppercase;color:var(--dim)}
 #dossier{white-space:pre-wrap;font-size:14px;min-height:80px}
@@ -425,20 +453,26 @@ def shelf_page(login: str):
     rows = shelf_for(pred)
     top = max((r["score"] for r in rows), default=1.0) or 1.0
     cards = "".join(
-        f"""<div class="card"><div class="nm"><a href="https://github.com/{html.escape(r["full_name"])}"
+        f"""<div class="card"{' hidden' if i >= SHELF_FIRST else ''}>
+<a href="https://github.com/{html.escape(r["full_name"])}" target="_blank" rel="noopener">
+<img class="og" loading="lazy" alt="" src="https://opengraph.githubassets.com/1/{html.escape(r["full_name"])}"></a>
+<div class="nm"><a href="https://github.com/{html.escape(r["full_name"])}"
 target="_blank" rel="noopener">{html.escape(r["full_name"])}</a></div>
 <div class="meta">{r["stars"]:,}★ · {html.escape(r["language"])}{" · " + html.escape(r["category"]) if r["category"] else ""}</div>
 <div class="pitch">{html.escape(r["pitch"])}</div>
-<div class="bar"><i style="width:{max(6, int(100 * r["score"] / top))}%"></i></div></div>"""
-        for r in rows)
+<div class="scorow"><div class="bar"><i style="width:{max(6, int(100 * r["score"] / top))}%"></i></div>
+<span class="sc">{int(100 * r["score"] / top)}%</span></div></div>"""
+        for i, r in enumerate(rows))
     prof = pred["profile"]
     langs = "".join(f"<span>{html.escape(x)}</span>" for x in prof["top_languages"])
     body = f"""
 <h1><a href="../">unstarred</a> / {html.escape(pred["login"])}</h1>
 <div class="cols"><div>
 <p class="sub">{prof["n_stars_pulled"]} recent stars read, {len(prof["own_repos"])} own repos.
-Already-starred repos are filtered out. Bars are model score relative to your top hit.</p>
-<div class="grid">{cards}</div></div>
+Already-starred repos are filtered out, dead links checked live. Scores are relative
+to your top hit.</p>
+<div class="grid">{cards}</div>
+<button id="more">give me five more</button></div>
 <div><div class="panel"><h3>the dossier</h3><div class="langs">{langs}</div>
 <div id="dossier"></div></div></div></div>
 <script>
@@ -446,6 +480,12 @@ const d=document.getElementById('dossier');
 const w=new WebSocket((location.protocol==='https:'?'wss':'ws')+'://'+location.host+
   location.pathname.replace(/\\/u\\/[^/]+$/,'')+'/ws/dossier/{html.escape(pred["login"])}');
 w.onmessage=(m)=>{{const x=JSON.parse(m.data);if(x.t==='tok')d.textContent+=x.d}};
+const cards=[...document.querySelectorAll('.grid .card')];
+let vis={SHELF_FIRST};
+const showMore=()=>{{cards.forEach((c,i)=>c.hidden=i>=vis);
+  document.getElementById('more').hidden=vis>=cards.length}};
+document.getElementById('more').onclick=()=>{{vis+=5;showMore()}};
+showMore();
 </script>"""
     return page(f"unstarred / {pred['login']}", body, page_login=pred["login"])
 
