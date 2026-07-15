@@ -266,7 +266,7 @@ def write_fg(df: pd.DataFrame) -> None:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--top-n", type=int, default=40000)
-    ap.add_argument("--model", default="claude-opus-4-8")
+    ap.add_argument("--model", default="claude-sonnet-5")
     ap.add_argument("--data-dir", default=None)
     ap.add_argument("--stage", choices=["readmes", "fingerprints", "fg", "all"], default="all")
     args = ap.parse_args()
