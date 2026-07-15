@@ -74,6 +74,10 @@ def get(s: requests.Session, url: str, accept: str | None = None, params: dict |
         if resp.status_code in (403, 429):
             wait_for_reset(resp)
             continue
+        if resp.status_code >= 500:  # GitHub gateway hiccups: back off, retry
+            print(f"retry {url}: HTTP {resp.status_code}", flush=True)
+            time.sleep(10 * (attempt + 1))
+            continue
         resp.raise_for_status()
         wait_for_reset(resp)
         return resp.json()
