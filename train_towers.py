@@ -202,7 +202,7 @@ def evaluate(query_tower, candidate_tower, items: pd.DataFrame, test: pd.DataFra
         h = last_hist[u]
         hist[i, : len(h)] = h
     u_num = scalars.reindex(users).fillna(0.0).to_numpy("float32")
-    user_vecs = query_tower.predict({"hist_ids": hist.astype(str), "user_num": u_num}, batch_size=2048, verbose=0)
+    user_vecs = query_tower.predict({"hist_ids": tf.constant(hist.astype(str)), "user_num": u_num}, batch_size=2048, verbose=0)
     u_row = {u: i for i, u in enumerate(users)}
 
     pop_rank = items["log1p_stars"].to_numpy()  # popularity blind baseline score
