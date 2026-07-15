@@ -102,6 +102,9 @@ def pull_user(s: requests.Session, login: str, max_pages: int, captured: datetim
     return {"login": login, "stars": stars, "own": own}
 
 
+FLUSH_EVERY = 2000  # users per incremental FG insert (upsert by pk, so safe)
+
+
 def pull(limit: int | None, max_pages: int) -> Path:
     seeds = [row["login"] for row in csv.DictReader((DATA / "seed_users.csv").open())]
     if limit:
@@ -116,14 +119,38 @@ def pull(limit: int | None, max_pages: int) -> Path:
 
     s = make_session(token())
     captured = now_utc()
+    batch: list[dict] = []
     with ckpt.open("a") as out:
         for i, login in enumerate(todo):
-            rec = pull_user(s, login, max_pages, captured)
-            out.write(json.dumps(rec or {"login": login, "stars": [], "own": []}, default=str) + "\n")
+            rec = pull_user(s, login, max_pages, captured) or {"login": login, "stars": [], "own": []}
+            out.write(json.dumps(rec, default=str) + "\n")
             out.flush()
+            batch.append(rec)
             if i % 200 == 0:
                 print(f"{i}/{len(todo)} users pulled", flush=True)
+            if len(batch) >= FLUSH_EVERY:
+                _flush_batch(batch)
+                batch = []
+        if batch:
+            _flush_batch(batch)
     return ckpt
+
+
+def _flush_batch(records: list[dict]) -> None:
+    """Incremental FG insert so downstream pipelines see data while the pull
+    is still running. Same frames() logic, scoped to this batch."""
+    import tempfile
+
+    with tempfile.NamedTemporaryFile("w", suffix=".jsonl", delete=False) as tmp:
+        for rec in records:
+            tmp.write(json.dumps(rec, default=str) + "\n")
+        path = Path(tmp.name)
+    try:
+        stars, repos, own = frames(path)
+        if len(stars):
+            write_fgs(stars, repos, own)
+    finally:
+        path.unlink()
 
 
 def frames(ckpt: Path) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
@@ -142,12 +169,13 @@ def frames(ckpt: Path) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
                 own_rows.append(
                     {"user_login": rec["login"], "repo_id": r["repo_id"], "captured_at": r["captured_at"]}
                 )
-    stars = pd.DataFrame(star_rows)
+    stars = pd.DataFrame(star_rows, columns=["user_login", "repo_id", "starred_at"])
     stars["starred_at"] = pd.to_datetime(stars["starred_at"], utc=True, format="mixed")
-    repos = pd.DataFrame(repo_rows.values())
+    repos = pd.DataFrame(list(repo_rows.values()))
     for col in ("created_at", "pushed_at", "captured_at"):
-        repos[col] = pd.to_datetime(repos[col], utc=True, format="mixed")
-    own = pd.DataFrame(own_rows)
+        if col in repos.columns:
+            repos[col] = pd.to_datetime(repos[col], utc=True, format="mixed")
+    own = pd.DataFrame(own_rows, columns=["user_login", "repo_id", "captured_at"])
     own["captured_at"] = pd.to_datetime(own["captured_at"], utc=True, format="mixed")
     return stars, repos, own
 
