@@ -116,42 +116,42 @@ def user_scalar_frame(train: pd.DataFrame, own: pd.DataFrame, asof) -> pd.DataFr
 
 
 def build_model(item_vocab: dict, drop_fingerprints: bool):
-    import tensorflow as tf
-    from tensorflow.keras import layers
+    import keras
+    from keras import layers, ops
 
     id_lookup = layers.StringLookup(vocabulary=item_vocab["repo_id"], name="id_lookup")
     id_emb = layers.Embedding(len(item_vocab["repo_id"]) + 1, ID_EMB, name="id_emb")
 
     # item tower
-    it_id = tf.keras.Input(shape=(), dtype=tf.string, name="repo_id")
-    it_num = tf.keras.Input(shape=(len(ITEM_NUM),), dtype=tf.float32, name="item_num")
+    it_id = keras.Input(shape=(), dtype="string", name="repo_id")
+    it_num = keras.Input(shape=(len(ITEM_NUM),), dtype="float32", name="item_num")
     parts = [id_emb(id_lookup(it_id)), it_num]
     str_inputs = {}
     for col in ITEM_STR:
         if drop_fingerprints and col in ("category", "maturity", "audience"):
             continue
-        inp = tf.keras.Input(shape=(), dtype=tf.string, name=col)
+        inp = keras.Input(shape=(), dtype="string", name=col)
         str_inputs[col] = inp
         lk = layers.StringLookup(vocabulary=item_vocab[col], name=f"{col}_lookup")
         parts.append(layers.Embedding(len(item_vocab[col]) + 1, 8, name=f"{col}_emb")(lk(inp)))
     x = layers.Concatenate()(parts)
     x = layers.Dense(128, activation="relu")(x)
     x = layers.Dense(DIM)(x)
-    item_out = tf.math.l2_normalize(x, axis=1)
-    candidate_tower = tf.keras.Model([it_id, it_num, *str_inputs.values()], item_out, name="candidate_tower")
+    item_out = layers.UnitNormalization(axis=-1)(x)
+    candidate_tower = keras.Model([it_id, it_num, *str_inputs.values()], item_out, name="candidate_tower")
 
     # user tower: shared id embedding averaged over history + scalars
-    u_hist = tf.keras.Input(shape=(HIST,), dtype=tf.string, name="hist_ids")
-    u_num = tf.keras.Input(shape=(len(USER_NUM),), dtype=tf.float32, name="user_num")
+    u_hist = keras.Input(shape=(HIST,), dtype="string", name="hist_ids")
+    u_num = keras.Input(shape=(len(USER_NUM),), dtype="float32", name="user_num")
     h_idx = id_lookup(u_hist)
     h_emb = id_emb(h_idx)
-    mask = tf.cast(tf.not_equal(h_idx, 0), tf.float32)[..., None]
-    h_avg = tf.reduce_sum(h_emb * mask, axis=1) / tf.maximum(tf.reduce_sum(mask, axis=1), 1.0)
+    mask = ops.expand_dims(ops.cast(ops.not_equal(h_idx, 0), "float32"), -1)
+    h_avg = ops.sum(h_emb * mask, axis=1) / ops.maximum(ops.sum(mask, axis=1), 1.0)
     y = layers.Concatenate()([h_avg, u_num])
     y = layers.Dense(128, activation="relu")(y)
     y = layers.Dense(DIM)(y)
-    user_out = tf.math.l2_normalize(y, axis=1)
-    query_tower = tf.keras.Model([u_hist, u_num], user_out, name="query_tower")
+    user_out = layers.UnitNormalization(axis=-1)(y)
+    query_tower = keras.Model([u_hist, u_num], user_out, name="query_tower")
     return query_tower, candidate_tower
 
 
