@@ -324,50 +324,83 @@ async def stream_dossier(ws: WebSocket, pred: dict):
 
 # ------------------------------------------------------------------- pages
 
+# GitHub Primer dark, mirrored: their layout vocabulary, their tab underline,
+# their language dots; the accent flipped to purple and every star hollow.
 CSS = """
-:root{--bg:#0b0e11;--panel:#12161b;--ink:#e5e7eb;--dim:#9ca3af;--acc:#34d399;--line:#1f2937}
+:root{--bg:#0d1117;--panel:#161b22;--ink:#e6edf3;--dim:#8b949e;--acc:#a371f7;
+--line:#30363d;--tab:#f78166;--btn:#21262d}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);
-font:15px/1.5 ui-sans-serif,system-ui,sans-serif}
+font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
 a{color:var(--acc);text-decoration:none}a:hover{text-decoration:underline}
-.wrap{max-width:1060px;margin:0 auto;padding:24px 20px 80px}
-h1{font-size:26px;margin:.2em 0}h1 a{color:var(--ink)}
+.wrap{max-width:1060px;margin:0 auto;padding:20px 20px 80px}
+h1{font-size:22px;margin:.2em 0;font-weight:600}h1 a{color:var(--ink)}
+h1 .ustar{color:var(--acc);font-weight:400}
 .sub{color:var(--dim);max-width:640px}
 form.login{display:flex;gap:8px;margin:22px 0}
-input[type=text]{flex:1;max-width:340px;background:var(--panel);border:1px solid var(--line);
-border-radius:8px;padding:10px 12px;color:var(--ink);font-size:15px}
-button{background:var(--acc);color:#04110b;border:0;border-radius:8px;padding:10px 18px;
-font-weight:600;cursor:pointer}
+input[type=text]{flex:1;max-width:340px;background:var(--bg);border:1px solid var(--line);
+border-radius:6px;padding:8px 12px;color:var(--ink);font-size:14px}
+input[type=text]:focus{outline:none;border-color:var(--acc)}
+button{background:var(--btn);color:var(--ink);border:1px solid var(--line);border-radius:6px;
+padding:8px 16px;font-weight:600;font-size:13px;cursor:pointer}
+button:hover{border-color:var(--dim)}
+button.cta{background:var(--acc);color:#0d1117;border-color:transparent}
 .cols{display:grid;grid-template-columns:1fr 320px;gap:24px}
 @media(max-width:900px){.cols{grid-template-columns:1fr}}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:14px}
-.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px}
-.card .og{width:100%;aspect-ratio:2/1;object-fit:cover;border-radius:6px;margin-bottom:8px;
-background:#0f1720;border:1px solid var(--line)}
-.card .nm{font-weight:600}.card .meta{color:var(--dim);font-size:12.5px;margin-top:2px}
-.card .pitch{font-size:13.5px;margin-top:6px;color:#c8cdd4}
-.scorow{display:flex;align-items:center;gap:8px;margin-top:8px}
-.scorow .sc{color:var(--acc);font-size:12px;font-weight:600;min-width:34px;text-align:right}
-.bar{flex:1;height:3px;background:var(--line);border-radius:2px}
-.bar i{display:block;height:3px;background:var(--acc);border-radius:2px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:14px 16px}
+.card .og{width:100%;aspect-ratio:2/1;object-fit:cover;border-radius:6px;margin-bottom:10px;
+background:#010409;border:1px solid var(--line)}
+.card .nm{font-weight:600;font-size:15px}
+.card .meta{color:var(--dim);font-size:12px;margin-top:4px;display:flex;align-items:center;gap:10px}
+.ldot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:4px;
+vertical-align:-1px;border:1px solid #ffffff22}
+.card .pitch{font-size:13px;margin-top:8px;color:#c9d1d9}
+.scorow{display:flex;align-items:center;gap:8px;margin-top:10px}
+.scorow .sc{color:var(--acc);font-size:12px;font-weight:600;min-width:34px;text-align:right;
+font-variant-numeric:tabular-nums}
+.bar{flex:1;height:4px;background:var(--btn);border-radius:2px}
+.bar i{display:block;height:4px;background:var(--acc);border-radius:2px}
 #more{display:block;margin:18px auto 0}
-.panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px}
-.panel h3{margin:0 0 8px;font-size:14px;letter-spacing:.06em;text-transform:uppercase;color:var(--dim)}
-#dossier{white-space:pre-wrap;font-size:14px;min-height:80px}
-.langs span{display:inline-block;background:#0f1720;border:1px solid var(--line);border-radius:20px;
-padding:2px 10px;margin:2px 4px 2px 0;font-size:12.5px;color:var(--dim)}
-.tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin-bottom:20px}
-.tabs button{background:none;color:var(--dim);border:0;border-bottom:2px solid transparent;
-border-radius:0;padding:10px 14px;font-weight:600;cursor:pointer}
-.tabs button.active{color:var(--ink);border-bottom-color:var(--acc)}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:14px 16px}
+.panel h3{margin:0 0 8px;font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--dim)}
+#dossier{white-space:pre-wrap;font-size:13.5px;min-height:80px}
+.langs span{display:inline-block;background:#a371f71a;border:1px solid #a371f733;border-radius:20px;
+padding:1px 10px;margin:2px 4px 2px 0;font-size:12px;color:var(--acc)}
+.tabs{display:flex;gap:8px;border-bottom:1px solid var(--line);margin-bottom:20px}
+.tabs button{background:none;color:var(--ink);border:0;border-bottom:2px solid transparent;
+border-radius:0;padding:8px 14px;font-weight:400;font-size:14px;cursor:pointer}
+.tabs button:hover{border-bottom-color:var(--line)}
+.tabs button.active{font-weight:600;border-bottom-color:var(--tab)}
 #librarian{max-width:720px}
-#log{min-height:200px;max-height:60vh;overflow-y:auto;padding:12px 16px;font-size:14px;
-background:var(--panel);border:1px solid var(--line);border-radius:10px}
+#log{min-height:200px;max-height:60vh;overflow-y:auto;padding:12px 16px;font-size:13.5px;
+background:var(--panel);border:1px solid var(--line);border-radius:6px}
 #log .q{color:var(--acc);margin-top:10px}#log .a{white-space:pre-wrap}#log .t{color:var(--dim);font-size:12px}
 #askform{display:flex;gap:6px;margin-top:10px}
 #askform input{flex:1}
-.err{color:#f87171}
-footer{margin-top:40px;color:var(--dim);font-size:12.5px}
+.err{color:#f85149}
+.chips{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 16px}
+.chips button{border-radius:20px;padding:4px 14px;font-weight:400;font-size:12.5px;color:var(--dim)}
+.chips button.active{color:var(--acc);border-color:var(--acc);font-weight:600}
+footer{margin-top:40px;color:var(--dim);font-size:12px}
 """
+
+# GitHub's own linguist colors for the dot; dim grey for the long tail
+LANG_COLORS = {
+    "Python": "#3572A5", "JavaScript": "#f1e05a", "TypeScript": "#3178c6",
+    "Rust": "#dea584", "Go": "#00ADD8", "C++": "#f34b7d", "C": "#555555",
+    "Java": "#b07219", "Shell": "#89e051", "Ruby": "#701516", "HTML": "#e34c26",
+    "CSS": "#563d7c", "Jupyter Notebook": "#DA5B0B", "Swift": "#F05138",
+    "Kotlin": "#A97BFF", "PHP": "#4F5D95", "C#": "#178600", "Zig": "#ec915c",
+    "Lua": "#000080", "Dart": "#00B4AB", "Elixir": "#6e4a7e", "Haskell": "#5e5086",
+}
+
+
+def lang_dot(language: str) -> str:
+    if not language or language == "none":
+        return ""
+    color = LANG_COLORS.get(language, "#8b949e")
+    return (f'<span><span class="ldot" style="background:{color}"></span>'
+            f'{html.escape(language)}</span>')
 
 ASK_JS = """
 const log=document.getElementById('log');
@@ -422,14 +455,14 @@ def home():
     n = len(state["repos"])
     m = state["metrics"]
     body = f"""
-<h1>unstarred</h1>
+<h1><span class="ustar">☆</span> unstarred</h1>
 <p class="sub">Which repos would you have starred already, if you had seen them?
 A two-tower model trained on {n:,} repos' worth of public star histories reads your
-stars and your own repos, and ranks what you haven't seen. The librarian in the corner
-talks to the same model.</p>
+stars and your own repos, and ranks what you haven't seen. The librarian in the next
+tab talks to the same model.</p>
 <form class="login" action="go" method="get">
 <input type="text" name="login" placeholder="your GitHub username" required>
-<button>read my stars</button></form>
+<button class="cta">read my stars</button></form>
 <p class="sub">Held out by time, the model puts a future star in its top 50
 {float(m.get("recall_at_50", 0)) * 100:.1f}% of the time; showing everyone the same
 trending list manages {float(m.get("pop_recall_at_50", 0)) * 100:.1f}%. Model
@@ -453,12 +486,12 @@ def shelf_page(login: str):
     rows = shelf_for(pred)
     top = max((r["score"] for r in rows), default=1.0) or 1.0
     cards = "".join(
-        f"""<div class="card"{' hidden' if i >= SHELF_FIRST else ''}>
+        f"""<div class="card" data-s="{r["stars"]}"{' hidden' if i >= SHELF_FIRST else ''}>
 <a href="https://github.com/{html.escape(r["full_name"])}" target="_blank" rel="noopener">
 <img class="og" loading="lazy" alt="" src="https://opengraph.githubassets.com/1/{html.escape(r["full_name"])}"></a>
 <div class="nm"><a href="https://github.com/{html.escape(r["full_name"])}"
 target="_blank" rel="noopener">{html.escape(r["full_name"])}</a></div>
-<div class="meta">{r["stars"]:,}★ · {html.escape(r["language"])}{" · " + html.escape(r["category"]) if r["category"] else ""}</div>
+<div class="meta"><span>☆ {r["stars"]:,}</span>{lang_dot(r["language"])}{f'<span>{html.escape(r["category"])}</span>' if r["category"] else ""}</div>
 <div class="pitch">{html.escape(r["pitch"])}</div>
 <div class="scorow"><div class="bar"><i style="width:{max(6, int(100 * r["score"] / top))}%"></i></div>
 <span class="sc">{int(100 * r["score"] / top)}%</span></div></div>"""
@@ -466,11 +499,15 @@ target="_blank" rel="noopener">{html.escape(r["full_name"])}</a></div>
     prof = pred["profile"]
     langs = "".join(f"<span>{html.escape(x)}</span>" for x in prof["top_languages"])
     body = f"""
-<h1><a href="../">unstarred</a> / {html.escape(pred["login"])}</h1>
+<h1><a href="../"><span class="ustar">☆</span> unstarred</a> / {html.escape(pred["login"])}</h1>
 <div class="cols"><div>
 <p class="sub">{prof["n_stars_pulled"]} recent stars read, {len(prof["own_repos"])} own repos.
 Already-starred repos are filtered out, dead links checked live. Scores are relative
 to your top hit.</p>
+<div class="chips" id="chips"><button class="active" data-lo="0" data-hi="">all</button>
+<button data-lo="10000" data-hi="">10k+ ☆</button>
+<button data-lo="1000" data-hi="10000">1k to 10k</button>
+<button data-lo="0" data-hi="1000">under 1k, the gems</button></div>
 <div class="grid">{cards}</div>
 <button id="more">give me five more</button></div>
 <div><div class="panel"><h3>the dossier</h3><div class="langs">{langs}</div>
@@ -481,11 +518,15 @@ const w=new WebSocket((location.protocol==='https:'?'wss':'ws')+'://'+location.h
   location.pathname.replace(/\\/u\\/[^/]+$/,'')+'/ws/dossier/{html.escape(pred["login"])}');
 w.onmessage=(m)=>{{const x=JSON.parse(m.data);if(x.t==='tok')d.textContent+=x.d}};
 const cards=[...document.querySelectorAll('.grid .card')];
-let vis={SHELF_FIRST};
-const showMore=()=>{{cards.forEach((c,i)=>c.hidden=i>=vis);
-  document.getElementById('more').hidden=vis>=cards.length}};
-document.getElementById('more').onclick=()=>{{vis+=5;showMore()}};
-showMore();
+let vis={SHELF_FIRST},lo=0,hi=Infinity;
+const fits=c=>{{const s=+c.dataset.s;return s>=lo&&s<hi}};
+const paint=()=>{{let n=0;cards.forEach(c=>{{c.hidden=!(fits(c)&&n<vis);n+=fits(c)}});
+  document.getElementById('more').hidden=vis>=n}};
+document.getElementById('more').onclick=()=>{{vis+=5;paint()}};
+document.querySelectorAll('#chips button').forEach(b=>b.onclick=()=>{{
+  document.querySelectorAll('#chips button').forEach(x=>x.classList.toggle('active',x===b));
+  lo=+b.dataset.lo;hi=b.dataset.hi===''?Infinity:+b.dataset.hi;vis={SHELF_FIRST};paint()}});
+paint();
 </script>"""
     return page(f"unstarred / {pred['login']}", body, page_login=pred["login"])
 
