@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import html
 import json
+import re
 import time
 from pathlib import Path
 
@@ -502,6 +503,33 @@ def health():
     return {"ok": True, "candidates": len(state["repos"]), "model_version": state["model_version"]}
 
 
+_PROXY_MOUNT = re.compile(r"^/hopsworks-api/pythonapp/[^/]+/[^/]+")
+
+
+class StripForwardedPrefix:
+    """Strip the Hopsworks proxy mount from the path (this cluster sets no
+    APP_BASE_URL_PATH env and no X-Forwarded-Prefix header) so routes match, and
+    record it as root_path for absolute links. Without it the app 404s forever."""
+
+    def __init__(self, inner):
+        self.inner = inner
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] in ("http", "websocket"):
+            prefix = dict(scope.get("headers") or {}).get(b"x-forwarded-prefix", b"").decode().rstrip("/")
+            if not prefix:
+                m = _PROXY_MOUNT.match(scope["path"])
+                prefix = m.group(0) if m else ""
+            if prefix and scope["path"].startswith(prefix):
+                scope = dict(scope)
+                scope["path"] = scope["path"][len(prefix):] or "/"
+                scope["root_path"] = prefix
+        await self.inner(scope, receive, send)
+
+
+application = StripForwardedPrefix(app)
+
+
 if __name__ == "__main__":
     boot()
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(application, host="0.0.0.0", port=8000)
