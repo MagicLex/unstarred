@@ -167,10 +167,25 @@ def fingerprints(df: pd.DataFrame, model: str) -> None:
             )
             for r in chunk.itertuples()
         ]
-        batch = client.messages.batches.create(requests=reqs)
+        for attempt in range(8):  # API 5xx outlives the SDK's 3 retries
+            try:
+                batch = client.messages.batches.create(requests=reqs)
+                break
+            except anthropic.APIStatusError as e:
+                if e.status_code < 500 or attempt == 7:
+                    raise
+                print(f"batch create {e.status_code}, retry {attempt + 1}/8 in {60 * (attempt + 1)}s", flush=True)
+                time.sleep(60 * (attempt + 1))
         print(f"batch {batch.id}: {len(reqs)} requests", flush=True)
         while True:  # bounded active polling: batches end within 24h by contract
-            b = client.messages.batches.retrieve(batch.id)
+            try:
+                b = client.messages.batches.retrieve(batch.id)
+            except anthropic.APIStatusError as e:
+                if e.status_code < 500:
+                    raise
+                print(f"batch poll {e.status_code}, retrying", flush=True)
+                time.sleep(60)
+                continue
             if b.processing_status == "ended":
                 break
             print(f"  {b.processing_status}: {b.request_counts.processing} processing", flush=True)
