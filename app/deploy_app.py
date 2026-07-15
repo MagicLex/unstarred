@@ -25,15 +25,21 @@ SERVER = f"/hopsfs/{rel.rsplit('/', 1)[0]}/server.py"
 ENTRYPOINT = f'bash -lc "exec python {SERVER}"'
 
 
+def _is_app(name: str) -> bool:
+    # substring match on APP_NAME alone also catches the unstarredquery
+    # predictor pods; require the pythonapp prefix + exact app segment
+    return name.startswith("pythonapp") and f"--{APP_NAME}-" in name or name == f"pythonapp-deadair--{APP_NAME}"
+
+
 def _pods():
     out = subprocess.run(["kubectl", "get", "pods"], capture_output=True, text=True).stdout
-    return [l.split()[0] for l in out.splitlines() if APP_NAME in l.split()[0]]
+    return [l.split()[0] for l in out.splitlines() if _is_app(l.split()[0])]
 
 
 def _purge_k8s():
     out = subprocess.run(["kubectl", "get", "deployment"], capture_output=True, text=True).stdout
     for line in out.splitlines():
-        if APP_NAME in line.split()[0]:
+        if _is_app(line.split()[0]):
             name = line.split()[0]
             subprocess.run(["kubectl", "delete", "deployment", name], capture_output=True)
             print(f"purged k8s deployment {name}", flush=True)

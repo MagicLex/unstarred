@@ -273,6 +273,9 @@ def main() -> None:
     fv = get_or_create_fv(fs)
     df, _ = fv.training_data(description="full star corpus; temporal split in trainer")
     df = prepare(df)
+    # offline FGs append across job runs (PK dedup is online-only); the repos
+    # join doubles star rows for re-seen repos, so dedupe the joined event
+    df = df.drop_duplicates(["user_login", "repo_id"], keep="last")
     print(f"corpus: {len(df)} stars, {df['user_login'].nunique()} users, {df['repo_id'].nunique()} repos", flush=True)
 
     t_hi = df["starred_at"].quantile(0.8)
@@ -288,7 +291,8 @@ def main() -> None:
 
     try:
         own = fs.get_feature_group("own_repos", version=1).read()
-        repo_langs = fs.get_feature_group("repos", version=1).read()[["repo_id", "language"]]
+        repo_langs = fs.get_feature_group("repos", version=1).read()[["repo_id", "language"]] \
+            .drop_duplicates("repo_id", keep="last")
         own = own.merge(repo_langs, on="repo_id", how="left")
         own["language"] = own["language"].fillna("none")
     except Exception as e:

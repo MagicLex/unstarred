@@ -35,9 +35,12 @@ EMB_DOC = {
 
 def item_frame(fs) -> pd.DataFrame:
     repos = fs.get_feature_group("repos", version=1).read()
+    # offline FGs append across job runs (PK dedup is online-only)
+    repos = repos.sort_values("captured_at").drop_duplicates("repo_id", keep="last")
     try:
         fps = fs.get_feature_group("repo_fingerprints", version=1).read()
-        fps = fps[["repo_id", "category", "maturity", "audience", "pitch", "readme_found"]]
+        fps = fps[["repo_id", "category", "maturity", "audience", "pitch", "readme_found"]] \
+            .drop_duplicates("repo_id", keep="last")
     except Exception as e:
         print(f"no fingerprints FG: {e}", flush=True)
         fps = pd.DataFrame(columns=["repo_id", "category", "maturity", "audience", "pitch", "readme_found"])

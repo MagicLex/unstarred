@@ -84,6 +84,8 @@ def candidates(top_n: int) -> pd.DataFrame:
     fs = hopsworks.login().get_feature_store()
     stars = fs.get_feature_group("star_events", version=1).read()
     repos = fs.get_feature_group("repos", version=1).read()
+    # offline FGs append across job runs (PK dedup is online-only)
+    repos = repos.sort_values("captured_at").drop_duplicates("repo_id", keep="last")
     counts = stars.groupby("repo_id")["user_login"].nunique().rename("corpus_stars")
     top = counts.sort_values(ascending=False).head(top_n).index
     return repos[repos["repo_id"].isin(top)].reset_index(drop=True)
