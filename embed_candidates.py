@@ -33,10 +33,17 @@ EMB_DOC = {
 }
 
 
-def item_frame(fs) -> pd.DataFrame:
+def item_frame(fs, top_n: int) -> pd.DataFrame:
     repos = fs.get_feature_group("repos", version=1).read()
     # offline FGs append across job runs (PK dedup is online-only)
     repos = repos.sort_values("captured_at").drop_duplicates("repo_id", keep="last")
+    # candidate corpus = top-N by distinct corpus stargazers (spec), same cut as
+    # the fingerprints; embedding everything serves one-bot spam repos whose
+    # untrained UNK id embeddings cluster and flood the shelf KNN
+    stars = fs.get_feature_group("star_events", version=1).read()
+    counts = stars.groupby("repo_id")["user_login"].nunique()
+    top = counts.sort_values(ascending=False).head(top_n).index
+    repos = repos[repos["repo_id"].isin(top)]
     try:
         fps = fs.get_feature_group("repo_fingerprints", version=1).read()
         fps = fps[["repo_id", "category", "maturity", "audience", "pitch", "readme_found"]] \
@@ -94,6 +101,7 @@ def main() -> None:
 
     ap = argparse.ArgumentParser()
     ap.add_argument("--model-version", type=int, default=None, help="default: latest")
+    ap.add_argument("--top-n", type=int, default=40000)
     args = ap.parse_args()
 
     project = hopsworks.login()
@@ -107,7 +115,7 @@ def main() -> None:
     config = json.loads((model_dir / "config.json").read_text())
     print(f"model unstarred v{model.version}, dim {config['dim']}", flush=True)
 
-    df = item_frame(fs)
+    df = item_frame(fs, args.top_n)
     print(f"corpus: {len(df)} repos", flush=True)
     vecs = embed(df, model_dir, config)
 
