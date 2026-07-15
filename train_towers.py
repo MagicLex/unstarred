@@ -311,20 +311,26 @@ def main() -> None:
     print(f"training pairs: {n}", flush=True)
 
     item_keys = [i.name for i in candidate_tower.inputs]
+    # logQ correction (Yi et al. 2019): in-batch negatives appear with P(item) ~
+    # its frequency, which otherwise punishes popular repos twice; subtract
+    # log P so the softmax scores taste, not rarity
+    freq = pd.Series(ex["repo_id"]).value_counts(normalize=True)
+    ex["log_q"] = np.log(pd.Series(ex["repo_id"]).map(freq).to_numpy("float32"))
     ds = tf.data.Dataset.from_tensor_slices((
         {"hist_ids": ex["hist_ids"], "user_num": ex["user_num"]},
         {k: ex[k] for k in item_keys},
+        ex["log_q"],
     )).shuffle(200_000, seed=11).batch(args.batch_size, drop_remainder=True).prefetch(2)
 
     opt = tf.keras.optimizers.Adam(1e-3)
     temperature = 0.05
 
     @tf.function
-    def step(u_in, i_in):
+    def step(u_in, i_in, log_q):
         with tf.GradientTape() as tape:
             u = query_tower(u_in, training=True)
             v = candidate_tower(i_in, training=True)
-            logits = tf.matmul(u, v, transpose_b=True) / temperature
+            logits = tf.matmul(u, v, transpose_b=True) / temperature - log_q[None, :]
             labels = tf.range(tf.shape(logits)[0])
             loss = tf.reduce_mean(tf.keras.losses.sparse_categorical_crossentropy(labels, logits, from_logits=True))
         variables = query_tower.trainable_variables + candidate_tower.trainable_variables
@@ -333,8 +339,8 @@ def main() -> None:
 
     for epoch in range(args.epochs):
         losses = []
-        for u_in, i_in in ds:
-            losses.append(float(step(u_in, i_in)))
+        for u_in, i_in, log_q in ds:
+            losses.append(float(step(u_in, i_in, log_q)))
         print(f"epoch {epoch}: loss {np.mean(losses):.4f}", flush=True)
 
     metrics = evaluate(query_tower, candidate_tower, items, test, train, scalars)
