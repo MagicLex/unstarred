@@ -25,7 +25,7 @@ def main() -> None:
     cfg["appPath"] = f"hdfs:///Projects/{project.name}/{_rel}/train_towers.py"
     cfg["environmentName"] = ENV_NAME
     cfg["files"] = f"hdfs:///Projects/{project.name}/{_rel}/unstarred_features.py"
-    cfg["resourceConfig"]["memory"] = 16384
+    cfg["resourceConfig"]["memory"] = 12288  # 16G is unschedulable on 32G nodes at ~55% load
 
     job = ja.get_job(JOB_NAME)
     if job is not None:  # config property lost its setter; recreate instead
