@@ -47,6 +47,46 @@ completes.
 - **Cold repos ride the LLM.** Repos with thin interaction history are only as
   findable as their README fingerprint is accurate.
 
+## The two towers
+
+Two small MLPs that project users and repos into the same 64-dim unit sphere,
+where the dot product is the recommendation score. The repo id embedding table
+is **shared** between the towers: the same 32-dim vector represents a repo
+when it is a candidate and when it sits in someone's history.
+
+```mermaid
+flowchart TB
+    subgraph QT[query tower: who you are]
+        h[last 30 starred repo ids] --> le[shared id embedding, 32d]
+        le --> avg[masked mean over history]
+        sc[taste scalars: volume, recency,<br>language entropy, own-repo profile] --> qc[concat]
+        avg --> qc
+        qc --> qd[Dense 128 relu -> Dense 64] --> qn[unit norm]
+    end
+    subgraph CT[candidate tower: what a repo is]
+        rid[repo_id] --> ce[shared id embedding, 32d]
+        strs[language + LLM fingerprint<br>category / maturity / audience, 8d each] --> cc[concat]
+        nums[log stars, forks, size,<br>age, fork/archived flags] --> cc
+        ce --> cc
+        cc --> cd[Dense 128 relu -> Dense 64] --> cn[unit norm]
+    end
+    qn --> dot(("u . v / 0.05"))
+    cn --> dot
+    dot --> loss[in-batch softmax,<br>logQ-corrected for popularity]
+    style dot fill:#a371f722,stroke:#a371f7,color:#e6edf3
+```
+
+Training pairs are (user history before t, repo starred at t): predict the
+next star from everything before it, sampled negatives being the rest of the
+batch. Uncorrected, in-batch sampling punishes popular repos (they appear as
+negatives in proportion to their popularity); the logQ correction subtracts
+log P(item) so the score is taste, not rarity.
+
+At serving the towers split: the candidate tower runs once per pipeline over
+the corpus into an online KNN index (`repo_embeddings`), the query tower runs
+per request on KServe against your live GitHub stars. A shelf is one dot
+product away from a cold start.
+
 ## Architecture
 
 An FTI (feature, training, inference) system on Hopsworks. Feature extraction
