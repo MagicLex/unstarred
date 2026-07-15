@@ -353,7 +353,8 @@ def main() -> None:
     plots(metrics, out)
 
     mr = project.get_model_registry()
-    model = mr.tensorflow.create_model(
+    # python, not tensorflow: TF models reject custom predictor scripts at deploy
+    model = mr.python.create_model(
         name="unstarred",
         metrics={k: v for k, v in metrics.items() if isinstance(v, (int, float))},
         description=f"two-tower retrieval; drop={args.drop}; shuffle={args.shuffle_labels}",
