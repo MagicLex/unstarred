@@ -1,8 +1,8 @@
 """unstarred: the review app. Shelf, dossier, chat.
 
 Server-rendered FastAPI (no SPA): the shelf is in the initial payload; JS
-hydrates the dossier stream and the ask drawer over websockets (the platform
-proxy buffers plain HTTP streaming).
+hydrates the dossier stream and the librarian tab over websockets (the
+platform proxy buffers plain HTTP streaming).
 
 The rank comes from the model, always: the shelf is a KNN over the trained
 item space with the user vector from the deployment; the chat compiles
@@ -326,22 +326,28 @@ font-weight:600;cursor:pointer}
 #dossier{white-space:pre-wrap;font-size:14px;min-height:80px}
 .langs span{display:inline-block;background:#0f1720;border:1px solid var(--line);border-radius:20px;
 padding:2px 10px;margin:2px 4px 2px 0;font-size:12.5px;color:var(--dim)}
-#drawer{position:fixed;right:0;top:0;bottom:0;width:380px;max-width:92vw;background:var(--panel);
-border-left:1px solid var(--line);display:flex;flex-direction:column;transform:translateX(100%);
-transition:transform .2s}#drawer.open{transform:none}
-#drawer .head{padding:12px 16px;border-bottom:1px solid var(--line);font-weight:600}
-#log{flex:1;overflow-y:auto;padding:12px 16px;font-size:14px}
+.tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin-bottom:20px}
+.tabs button{background:none;color:var(--dim);border:0;border-bottom:2px solid transparent;
+border-radius:0;padding:10px 14px;font-weight:600;cursor:pointer}
+.tabs button.active{color:var(--ink);border-bottom-color:var(--acc)}
+#librarian{max-width:720px}
+#log{min-height:200px;max-height:60vh;overflow-y:auto;padding:12px 16px;font-size:14px;
+background:var(--panel);border:1px solid var(--line);border-radius:10px}
 #log .q{color:var(--acc);margin-top:10px}#log .a{white-space:pre-wrap}#log .t{color:var(--dim);font-size:12px}
-#askform{display:flex;gap:6px;padding:10px;border-top:1px solid var(--line)}
+#askform{display:flex;gap:6px;margin-top:10px}
 #askform input{flex:1}
-#askbtn{position:fixed;right:18px;bottom:18px;z-index:5}
 .err{color:#f87171}
 footer{margin-top:40px;color:var(--dim);font-size:12.5px}
 """
 
 ASK_JS = """
-const drawer=document.getElementById('drawer'),log=document.getElementById('log');
-document.getElementById('askbtn').onclick=()=>drawer.classList.toggle('open');
+const log=document.getElementById('log');
+document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('.tabs button').forEach(x=>x.classList.toggle('active',x===b));
+  document.getElementById('main').hidden=b.dataset.t!=='main';
+  document.getElementById('librarian').hidden=b.dataset.t!=='librarian';
+  if(b.dataset.t==='librarian')document.getElementById('q').focus();
+});
 let hist=[],ws=null;
 document.getElementById('askform').onsubmit=(e)=>{
   e.preventDefault();
@@ -361,18 +367,20 @@ document.getElementById('askform').onsubmit=(e)=>{
 
 
 def page(title: str, body: str, page_login: str = "") -> HTMLResponse:
-    root = ""  # app served at its own subpath by the platform proxy; relative links only
+    main_tab = "shelf" if page_login else "home"
     return HTMLResponse(f"""<!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{html.escape(title)}</title><style>{CSS}</style></head><body>
-<div class="wrap">{body}
+<div class="wrap">
+<nav class="tabs"><button class="active" data-t="main">{main_tab}</button>
+<button data-t="librarian">ask the librarian</button></nav>
+<section id="main">{body}</section>
+<section id="librarian" hidden><div id="log"></div>
+<form id="askform"><input type="text" id="q" placeholder="the perfect repo for…" autocomplete="off">
+<button>ask</button></form></section>
 <footer>unstarred #012 · a two-tower recommender with an LLM on top · rank is resemblance
 to starring behavior, never a quality verdict · <a href="https://github.com/MagicLex/unstarred">source</a></footer>
 </div>
-<button id="askbtn">ask the librarian</button>
-<div id="drawer"><div class="head">ask the librarian</div><div id="log"></div>
-<form id="askform"><input type="text" id="q" placeholder="the perfect repo for…" autocomplete="off">
-<button>ask</button></form></div>
 <script>const PAGE_LOGIN={json.dumps(page_login or None)};{ASK_JS}</script>
 </body></html>""")
 
