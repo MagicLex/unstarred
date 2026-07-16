@@ -46,6 +46,8 @@ Three honest readings:
 - **One test star in ten is in the model's top 100** out of 362k repos, from
   nothing but the order people starred things in.
 
+![recall@k, model vs baselines](assets/recall.png)
+
 ## Caveats
 
 - **The corpus is who we crawled.** 9,849 currently-active starring users from
