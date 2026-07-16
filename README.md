@@ -16,36 +16,47 @@ hit from the model.
 
 A recommendation is resemblance to starring behavior, never a quality verdict.
 
-## The result (provisional)
+## The result
 
-`unstarred` v2, two towers of 64 dims over 434k star events from the first 60%
-of the 9,849-user corpus. Held out by time: the test set is stars users
-actually added after the 80th-percentile timestamp. The blind baseline is
-popularity in the feature window, the same trending list for everyone.
+`unstarred` v3, two towers of 64 dims (logQ-corrected in-batch softmax) over
+1,015,374 star events from 9,331 users. Held out by time: the test set is the
+203k stars users actually added after the 80th-percentile timestamp, scored
+against a 362k-repo corpus.
 
-| metric (temporal holdout, 3,897 users, 78,577 future stars) | model | popularity | lift |
-|---|---:|---:|---:|
-| recall@10 | 0.23% | 0.06% | 3.9x |
-| recall@50 | 0.78% | 0.08% | 9.5x |
-| recall@100 | 1.34% | 0.08% | 16.1x |
-| MRR@100 | 0.0012 | 0.0001 | 11.1x |
+| recall on 144,193 future stars (6,879 users) | @10 | @50 | @100 | MRR@100 |
+|---|---:|---:|---:|---:|
+| **unstarred v3 (served)** | **2.24%** | **6.89%** | **10.45%** | **0.0102** |
+| fingerprint-off ablation | 2.35% | 7.10% | 10.72% | 0.0108 |
+| shuffled-label control | 1.09% | 4.02% | 6.65% | 0.0047 |
+| GitHub-star popularity (trending) | 0.03% | 0.24% | 0.28% | 0.0001 |
 
-Absolute recall is small by construction: the task is picking one future star
-out of 195k repos. The lift over popularity is the claim. Numbers are
-provisional: the full-corpus retrain, the shuffle-label control (must
-collapse) and the fingerprint-off ablation land here when the data pull
-completes.
+Three honest readings:
+
+- **The shuffled control did not collapse to trending, and that is the most
+  interesting number here.** With the logQ correction, a model trained on
+  shuffled labels can learn exactly one thing: which repos are popular *inside
+  this corpus*. So 6.65% is the corpus-popularity floor, a far stronger blind
+  ranker than GitHub trending (0.28%). The personalization is what stands
+  above it: 1.6x at recall@100, 2.1x at recall@10 and MRR. Taste matters most
+  at the top of the shelf.
+- **The LLM fingerprints are neutral in the tower** (10.72% without vs 10.45%
+  with, within noise). Their value is elsewhere: the semantic search, the
+  cold-start index and every pitch on a card come from them, none of which the
+  towers provide.
+- **One test star in ten is in the model's top 100** out of 362k repos, from
+  nothing but the order people starred things in.
 
 ## Caveats
 
-- **Provisional numbers.** Trained on the first 60% of the user corpus;
-  controls not yet run. Treat the lift as a signal, not the final figure.
 - **The corpus is who we crawled.** 9,849 currently-active starring users from
   GH Archive. Their taste sets the candidate pool and its biases.
 - **Resemblance, not quality.** A recommendation means people with similar
   star histories starred it, never that the code is good.
 - **Cold repos ride the LLM.** Repos with thin interaction history are only as
   findable as their README fingerprint is accurate.
+- **199 of the top-40k candidates ship without fingerprints** (security tooling
+  whose READMEs tripped the fingerprinting model's safeguards); they stay
+  recommendable through the collaborative signal alone.
 
 ## The two towers
 
