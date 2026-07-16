@@ -131,6 +131,17 @@ def main() -> None:
         "item_vector": [v.tolist() for v in vecs],
     })
 
+    # embeddings are one model version's full-corpus artifact, not an append
+    # log: recreate the FG so stale-space vectors from prior runs cannot
+    # linger in the KNN (offline inserts append; PK dedup is online-only)
+    try:
+        old = fs.get_feature_group("repo_embeddings", version=1)
+        if old is not None:
+            old.delete()
+            print("dropped previous repo_embeddings", flush=True)
+    except Exception as e:
+        print(f"no previous embeddings FG: {e}", flush=True)
+
     ei = embedding.EmbeddingIndex()
     ei.add_embedding(name="item_vector", dimension=config["dim"])
     fg = fs.get_or_create_feature_group(
