@@ -51,12 +51,17 @@ def boot() -> None:
     mr = project.get_model_registry()
     model = max(mr.get_models("unstarred"), key=lambda m: m.version)
     state["model_version"] = model.version
-    state["metrics"] = model.training_metrics or {}
+    # Hopsworks sanitizes metric keys on register (recall_at_50 -> recall_at__50);
+    # collapse runs of underscores so the trainer's names resolve at read time.
+    state["metrics"] = {re.sub(r"_+", "_", k): v for k, v in (model.training_metrics or {}).items()}
 
     # display frame + anchor vectors in memory: 300k x 64 floats is ~80MB and
     # buys instant anchor lookup + name search; the online KNN stays the
     # retrieval path for shelf and chat
     df = state["emb_fg"].select_all().read()
+    # offline FGs append across job runs (PK dedup is online-only): keep the
+    # newest embedding per repo so anchors match the online KNN's vectors
+    df = df.sort_values("embedded_at").drop_duplicates("repo_id", keep="last").reset_index(drop=True)
     df["full_name_lc"] = df["full_name"].str.lower()
     state["vecs"] = np.array(df["item_vector"].tolist(), dtype="float32")
     state["repos"] = df.drop(columns=["item_vector"]).reset_index(drop=True)
@@ -324,64 +329,137 @@ async def stream_dossier(ws: WebSocket, pred: dict):
 
 # ------------------------------------------------------------------- pages
 
-# GitHub Primer dark, mirrored: their layout vocabulary, their tab underline,
-# their language dots; the accent flipped to purple and every star hollow.
+# A dark instrument, not a GitHub clone: warm ink ground, one star-gold accent,
+# and mono for every number so the readout reads like a machine showing its work.
 CSS = """
-:root{--bg:#0d1117;--panel:#161b22;--ink:#e6edf3;--dim:#8b949e;--acc:#a371f7;
---line:#30363d;--tab:#f78166;--btn:#21262d}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);
-font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
-a{color:var(--acc);text-decoration:none}a:hover{text-decoration:underline}
-.wrap{max-width:1060px;margin:0 auto;padding:20px 20px 80px}
-h1{font-size:22px;margin:.2em 0;font-weight:600}h1 a{color:var(--ink)}
-h1 .ustar{color:var(--acc);font-weight:400}
-.sub{color:var(--dim);max-width:640px}
-form.login{display:flex;gap:8px;margin:22px 0}
-input[type=text]{flex:1;max-width:340px;background:var(--bg);border:1px solid var(--line);
-border-radius:6px;padding:8px 12px;color:var(--ink);font-size:14px}
-input[type=text]:focus{outline:none;border-color:var(--acc)}
-button{background:var(--btn);color:var(--ink);border:1px solid var(--line);border-radius:6px;
-padding:8px 16px;font-weight:600;font-size:13px;cursor:pointer}
-button:hover{border-color:var(--dim)}
-button.cta{background:var(--acc);color:#0d1117;border-color:transparent}
-.cols{display:grid;grid-template-columns:1fr 320px;gap:24px}
+:root{--bg:#0a0a0d;--bg2:#0f0f14;--panel:#14141b;--panel2:#1b1b24;
+--ink:#ece7dd;--dim:#8f8f9d;--faint:#5b5b67;
+--line:#26262f;--line2:#34343f;
+--gold:#f5c451;--gold-soft:#f5c45122;--gold-line:#f5c45140;
+--bad:#f0708a;--good:#7ee0b8;
+--mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,monospace;
+--sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+*{box-sizing:border-box}
+body{margin:0;background:
+radial-gradient(1100px 500px at 15% -10%,#16121f 0%,transparent 60%),var(--bg);
+color:var(--ink);font:15px/1.6 var(--sans);-webkit-font-smoothing:antialiased}
+a{color:var(--gold);text-decoration:none}a:hover{text-decoration:underline}
+.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.wrap{max-width:1080px;margin:0 auto;padding:18px 22px 90px}
+h1{font-size:20px;margin:0;font-weight:650;letter-spacing:-.01em}
+h1 a{color:var(--ink)}.ustar{color:var(--gold);font-weight:400}
+.crumb{color:var(--faint)}
+.sub{color:var(--dim);max-width:660px;font-size:14.5px}
+
+/* home hero */
+.hero{margin:34px 0 8px}
+.hero h2{font-size:clamp(28px,4.5vw,44px);line-height:1.08;font-weight:680;
+letter-spacing:-.02em;margin:0 0 14px;max-width:15ch}
+.hero h2 em{font-style:normal;color:var(--gold)}
+.lede{font-size:16px;color:var(--dim);max-width:640px;margin:0 0 26px}
+form.login{display:flex;gap:10px;margin:0 0 8px;max-width:480px}
+input[type=text]{flex:1;background:var(--bg2);border:1px solid var(--line2);
+border-radius:9px;padding:11px 14px;color:var(--ink);font-size:15px}
+input[type=text]:focus{outline:none;border-color:var(--gold);box-shadow:0 0 0 3px var(--gold-soft)}
+button{background:var(--panel2);color:var(--ink);border:1px solid var(--line2);border-radius:9px;
+padding:11px 18px;font-weight:600;font-size:14px;cursor:pointer;font-family:var(--sans)}
+button:hover{border-color:var(--faint)}
+button.cta{background:var(--gold);color:#1a1405;border-color:transparent}
+button.cta:hover{background:#ffd469}
+
+/* the flex: model vs trending */
+.flex{background:linear-gradient(180deg,var(--panel) 0%,#111119 100%);
+border:1px solid var(--line);border-radius:14px;padding:24px 26px;margin:36px 0}
+.flex .big{font-family:var(--mono);font-size:clamp(40px,7vw,68px);font-weight:700;
+color:var(--gold);line-height:1;letter-spacing:-.03em}
+.flex .cap{color:var(--dim);max-width:600px;margin:6px 0 22px;font-size:14.5px}
+.cmp{display:flex;flex-direction:column;gap:12px;max-width:640px}
+.cmprow{display:grid;grid-template-columns:118px 1fr 70px;align-items:center;gap:14px}
+.cmprow .lbl{font-size:12.5px;color:var(--dim);text-transform:uppercase;letter-spacing:.05em}
+.track{height:12px;background:#00000055;border:1px solid var(--line);border-radius:7px;overflow:hidden}
+.track i{display:block;height:100%;border-radius:6px}
+.track i.model{background:linear-gradient(90deg,#f5c451,#ffdd7a)}
+.track i.pop{background:var(--faint)}
+.cmprow .val{font-family:var(--mono);font-size:14px;text-align:right;font-variant-numeric:tabular-nums}
+.cmprow .val.model{color:var(--gold);font-weight:600}.cmprow .val.pop{color:var(--dim)}
+.flex .foot{color:var(--faint);font-size:12.5px;margin-top:18px;font-family:var(--mono)}
+
+/* machinery strip */
+.mach{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin:30px 0}
+@media(max-width:820px){.mach{grid-template-columns:1fr}}
+.step{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px 18px;position:relative}
+.step .k{font-family:var(--mono);font-size:11px;color:var(--gold);letter-spacing:.08em}
+.step h4{margin:8px 0 6px;font-size:14.5px;font-weight:640}
+.step p{margin:0;color:var(--dim);font-size:13px;line-height:1.5}
+.step .badge{display:inline-block;margin-top:10px;font-family:var(--mono);font-size:10.5px;
+letter-spacing:.06em;color:var(--gold);background:var(--gold-soft);border:1px solid var(--gold-line);
+border-radius:6px;padding:2px 8px}
+
+/* shelf */
+.shelfhead{display:flex;align-items:baseline;justify-content:space-between;gap:16px;flex-wrap:wrap;margin:8px 0 4px}
+.readout{font-family:var(--mono);font-size:12px;color:var(--faint);display:flex;gap:16px;flex-wrap:wrap}
+.readout b{color:var(--gold);font-weight:600}
+.cols{display:grid;grid-template-columns:1fr 300px;gap:26px;margin-top:22px}
 @media(max-width:900px){.cols{grid-template-columns:1fr}}
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:14px}
-.card{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:14px 16px}
-.card .og{width:100%;aspect-ratio:2/1;object-fit:cover;border-radius:6px;margin-bottom:10px;
-background:#010409;border:1px solid var(--line)}
-.card .nm{font-weight:600;font-size:15px}
-.card .meta{color:var(--dim);font-size:12px;margin-top:4px;display:flex;align-items:center;gap:10px}
-.ldot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:4px;
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:0 0 14px;
+overflow:hidden;transition:border-color .12s,transform .12s}
+.card:hover{border-color:var(--line2);transform:translateY(-2px)}
+.card .og{width:100%;aspect-ratio:2/1;object-fit:cover;display:block;background:#06060a;border-bottom:1px solid var(--line)}
+.card .body{padding:12px 15px 0}
+.card .nm{font-weight:640;font-size:15px;letter-spacing:-.01em}
+.card .meta{color:var(--dim);font-size:12px;margin-top:5px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;font-family:var(--mono)}
+.ldot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:5px;
 vertical-align:-1px;border:1px solid #ffffff22}
-.card .pitch{font-size:13px;margin-top:8px;color:#c9d1d9}
-.scorow{display:flex;align-items:center;gap:8px;margin-top:10px}
-.scorow .sc{color:var(--acc);font-size:12px;font-weight:600;min-width:34px;text-align:right;
-font-variant-numeric:tabular-nums}
-.bar{flex:1;height:4px;background:var(--btn);border-radius:2px}
-.bar i{display:block;height:4px;background:var(--acc);border-radius:2px}
-#more{display:block;margin:18px auto 0}
-.panel{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:14px 16px}
-.panel h3{margin:0 0 8px;font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--dim)}
-#dossier{white-space:pre-wrap;font-size:13.5px;min-height:80px}
-.langs span{display:inline-block;background:#a371f71a;border:1px solid #a371f733;border-radius:20px;
-padding:1px 10px;margin:2px 4px 2px 0;font-size:12px;color:var(--acc)}
-.tabs{display:flex;gap:8px;border-bottom:1px solid var(--line);margin-bottom:20px}
-.tabs button{background:none;color:var(--ink);border:0;border-bottom:2px solid transparent;
-border-radius:0;padding:8px 14px;font-weight:400;font-size:14px;cursor:pointer}
-.tabs button:hover{border-bottom-color:var(--line)}
-.tabs button.active{font-weight:600;border-bottom-color:var(--tab)}
-#librarian{max-width:720px}
-#log{min-height:200px;max-height:60vh;overflow-y:auto;padding:12px 16px;font-size:13.5px;
-background:var(--panel);border:1px solid var(--line);border-radius:6px}
-#log .q{color:var(--acc);margin-top:10px}#log .a{white-space:pre-wrap}#log .t{color:var(--dim);font-size:12px}
-#askform{display:flex;gap:6px;margin-top:10px}
-#askform input{flex:1}
-.err{color:#f85149}
-.chips{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 16px}
-.chips button{border-radius:20px;padding:4px 14px;font-weight:400;font-size:12.5px;color:var(--dim)}
-.chips button.active{color:var(--acc);border-color:var(--acc);font-weight:600}
-footer{margin-top:40px;color:var(--dim);font-size:12px}
+.tag{color:var(--faint);border:1px solid var(--line2);border-radius:5px;padding:0 6px;font-size:11px}
+.card .pitch{font-size:13px;margin-top:9px;color:#c7c2b8;line-height:1.5}
+.scorow{display:flex;align-items:center;gap:9px;margin-top:12px}
+.scorow .lab{font-family:var(--mono);font-size:10px;color:var(--faint);letter-spacing:.05em}
+.bar{flex:1;height:5px;background:#00000055;border:1px solid var(--line);border-radius:4px;overflow:hidden}
+.bar i{display:block;height:100%;background:linear-gradient(90deg,#f5c451,#ffdd7a)}
+.scorow .sc{color:var(--gold);font-size:12px;font-weight:600;min-width:36px;text-align:right;
+font-family:var(--mono);font-variant-numeric:tabular-nums}
+#more{display:block;margin:22px auto 0}
+
+/* side rail */
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:16px}
+.panel h3{margin:0 0 10px;font-family:var(--mono);font-size:11px;letter-spacing:.09em;
+text-transform:uppercase;color:var(--dim);display:flex;align-items:center;gap:8px}
+.live{width:7px;height:7px;border-radius:50%;background:var(--gold);box-shadow:0 0 0 0 var(--gold-soft);
+animation:pulse 1.6s infinite}
+@keyframes pulse{0%{box-shadow:0 0 0 0 #f5c45166}70%{box-shadow:0 0 0 7px #f5c45100}100%{box-shadow:0 0 0 0 #f5c45100}}
+#dossier{white-space:pre-wrap;font-size:13.5px;min-height:90px;color:#d8d3c8;line-height:1.6}
+#dossier:empty::before{content:"reading your stars";color:var(--faint);font-family:var(--mono);font-size:12px}
+#dossier:empty::after{content:"…";color:var(--faint)}
+.langs{margin-bottom:12px}
+.langs span{display:inline-block;background:var(--gold-soft);border:1px solid var(--gold-line);border-radius:20px;
+padding:1px 10px;margin:2px 4px 2px 0;font-size:12px;color:var(--gold);font-family:var(--mono)}
+.rstat{font-family:var(--mono);font-size:12px;color:var(--dim);line-height:1.9}
+.rstat b{color:var(--gold)}
+
+/* tabs */
+.tabs{display:flex;gap:6px;margin-bottom:22px;border-bottom:1px solid var(--line)}
+.tabs button{background:none;color:var(--dim);border:0;border-bottom:2px solid transparent;
+border-radius:0;padding:9px 4px;margin-right:14px;font-weight:500;font-size:14px;cursor:pointer}
+.tabs button:hover{color:var(--ink)}
+.tabs button.active{color:var(--ink);border-bottom-color:var(--gold)}
+
+/* librarian */
+#librarian{max-width:740px}
+.libintro{color:var(--dim);font-size:13.5px;margin:0 0 14px}
+#log{min-height:220px;max-height:58vh;overflow-y:auto;padding:14px 18px;font-size:14px;
+background:var(--panel);border:1px solid var(--line);border-radius:12px}
+#log .q{color:var(--gold);margin-top:14px;font-weight:600}
+#log .a{white-space:pre-wrap;color:#d8d3c8;line-height:1.6}
+#log .t{color:var(--faint);font-family:var(--mono);font-size:11.5px;margin:6px 0;
+display:inline-block;background:var(--bg2);border:1px solid var(--line);border-radius:6px;padding:2px 9px}
+#askform{display:flex;gap:8px;margin-top:12px}#askform input{flex:1}
+.err{color:var(--bad)}
+.chips{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 18px}
+.chips button{border-radius:20px;padding:5px 14px;font-weight:500;font-size:12.5px;color:var(--dim);
+font-family:var(--mono)}
+.chips button.active{color:var(--gold);border-color:var(--gold-line);background:var(--gold-soft)}
+footer{margin-top:52px;color:var(--faint);font-size:12px;border-top:1px solid var(--line);padding-top:18px;line-height:1.7}
 """
 
 # GitHub's own linguist colors for the dot; dim grey for the long tail
@@ -422,7 +500,7 @@ document.getElementById('askform').onsubmit=(e)=>{
   ws.onmessage=(m)=>{const d=JSON.parse(m.data);
     if(d.t==='tok'){ad.textContent+=d.d;log.scrollTop=log.scrollHeight}
     else if(d.t==='tool'){const t=document.createElement('div');t.className='t';
-      t.textContent='[consulting '+d.d+'…]';log.insertBefore(t,ad)}
+      t.textContent='consulting '+d.d;log.insertBefore(t,ad)}
     else if(d.t==='end'){hist.push([q,ad.textContent]);ws.close()}};
 };
 """
@@ -437,7 +515,11 @@ def page(title: str, body: str, page_login: str = "") -> HTMLResponse:
 <nav class="tabs"><button class="active" data-t="main">{main_tab}</button>
 <button data-t="librarian">ask the librarian</button></nav>
 <section id="main">{body}</section>
-<section id="librarian" hidden><div id="log"></div>
+<section id="librarian" hidden>
+<p class="libintro">Ask in plain english. The librarian compiles it into deterministic KNN
+queries over the model's indexes and streams the answer. Every repo it names comes from a
+tool call, never invented. Try "a tui database client under 1k stars" or "more like tqdm".</p>
+<div id="log"></div>
 <form id="askform"><input type="text" id="q" placeholder="the perfect repo for…" autocomplete="off">
 <button>ask</button></form></section>
 <footer>unstarred #012 · a two-tower recommender with an LLM on top · rank is resemblance
@@ -454,19 +536,51 @@ app = FastAPI()
 def home():
     n = len(state["repos"])
     m = state["metrics"]
+    r50 = float(m.get("recall_at_50", 0))
+    p50 = float(m.get("pop_recall_at_50", 0))
+    mult = r50 / p50 if p50 else 0
+    n_users = int(float(m.get("n_test_users", 0)))
+    n_stars = int(float(m.get("n_test_stars", 0)))
+    pop_w = max(3, round(100 * p50 / r50)) if r50 else 3  # trending bar, relative to the model bar
     body = f"""
-<h1><span class="ustar">☆</span> unstarred</h1>
-<p class="sub">Which repos would you have starred already, if you had seen them?
-A two-tower model trained on {n:,} repos' worth of public star histories reads your
-stars and your own repos, and ranks what you haven't seen. The librarian in the next
-tab talks to the same model.</p>
+<div class="hero">
+<h2>Which repos would you have <em>starred already</em>, if you had seen them?</h2>
+<p class="lede">A two-tower model trained on {n:,} repos' worth of public star histories reads
+your stars and your own repos, then ranks the ones you have not seen. Type a GitHub
+username and watch it read you.</p>
 <form class="login" action="go" method="get">
-<input type="text" name="login" placeholder="your GitHub username" required>
+<input type="text" name="login" placeholder="your GitHub username" required autofocus>
 <button class="cta">read my stars</button></form>
-<p class="sub">Held out by time, the model puts a future star in its top 50
-{float(m.get("recall_at_50", 0)) * 100:.1f}% of the time; showing everyone the same
-trending list manages {float(m.get("pop_recall_at_50", 0)) * 100:.1f}%. Model
-v{state["model_version"]}.</p>"""
+</div>
+
+<div class="flex">
+<div class="big">{mult:.0f}&times;</div>
+<p class="cap">Held out by time, the model puts a repo you would later star in its top 50
+about <b>{mult:.0f} times more often</b> than showing everyone the same trending list does.
+Same corpus, same held-out future, one blind popularity baseline.</p>
+<div class="cmp">
+<div class="cmprow"><span class="lbl">the model</span>
+<div class="track"><i class="model" style="width:100%"></i></div>
+<span class="val model">{r50 * 100:.1f}%</span></div>
+<div class="cmprow"><span class="lbl">trending</span>
+<div class="track"><i class="pop" style="width:{pop_w}%"></i></div>
+<span class="val pop">{p50 * 100:.2f}%</span></div>
+</div>
+<div class="foot">recall@50 on {n_users:,} held-out users · {n_stars:,} future stars · model v{state["model_version"]}</div>
+</div>
+
+<div class="mach">
+<div class="step"><div class="k">RETRIEVAL</div><h4>Two towers, one taste space</h4>
+<p>Your stars become a vector. Every repo becomes a vector. The shelf is a nearest-neighbour
+lookup, not a hand-tuned rule.</p></div>
+<div class="step"><div class="k">LANGUAGE</div><h4>The LLM writes, never picks</h4>
+<p>It fingerprints READMEs for cold-start, writes your taste dossier, and turns your words
+into queries. It never chooses a repo for you.</p>
+<span class="badge">LLM ∉ the ranking</span></div>
+<div class="step"><div class="k">ASK</div><h4>A librarian you can talk to</h4>
+<p>Plain English compiles into deterministic KNN calls over the same indexes. Every repo it
+names comes from a tool result.</p></div>
+</div>"""
     return page("unstarred", body)
 
 
@@ -489,29 +603,42 @@ def shelf_page(login: str):
         f"""<div class="card" data-s="{r["stars"]}"{' hidden' if i >= SHELF_FIRST else ''}>
 <a href="https://github.com/{html.escape(r["full_name"])}" target="_blank" rel="noopener">
 <img class="og" loading="lazy" alt="" src="https://opengraph.githubassets.com/1/{html.escape(r["full_name"])}"></a>
+<div class="body">
 <div class="nm"><a href="https://github.com/{html.escape(r["full_name"])}"
 target="_blank" rel="noopener">{html.escape(r["full_name"])}</a></div>
-<div class="meta"><span>☆ {r["stars"]:,}</span>{lang_dot(r["language"])}{f'<span>{html.escape(r["category"])}</span>' if r["category"] else ""}</div>
+<div class="meta"><span>☆ {r["stars"]:,}</span>{lang_dot(r["language"])}{f'<span class="tag">{html.escape(r["category"])}</span>' if r["category"] else ""}</div>
 <div class="pitch">{html.escape(r["pitch"])}</div>
-<div class="scorow"><div class="bar"><i style="width:{max(6, int(100 * r["score"] / top))}%"></i></div>
-<span class="sc">{int(100 * r["score"] / top)}%</span></div></div>"""
+<div class="scorow"><span class="lab">FIT</span><div class="bar"><i style="width:{max(6, int(100 * r["score"] / top))}%"></i></div>
+<span class="sc">{int(100 * r["score"] / top)}%</span></div></div></div>"""
         for i, r in enumerate(rows))
     prof = pred["profile"]
     langs = "".join(f"<span>{html.escape(x)}</span>" for x in prof["top_languages"])
+    m = state["metrics"]
+    r50 = float(m.get("recall_at_50", 0)) * 100
+    p50 = float(m.get("pop_recall_at_50", 0)) * 100
     body = f"""
-<h1><a href="../"><span class="ustar">☆</span> unstarred</a> / {html.escape(pred["login"])}</h1>
+<div class="shelfhead">
+<h1><a href="../"><span class="ustar">☆</span> unstarred</a> <span class="crumb">/ {html.escape(pred["login"])}</span></h1>
+<div class="readout"><span>KNN in trained taste space</span>
+<span>from <b>{prof["n_stars_pulled"]}</b> live stars</span>
+<span>model <b>v{state["model_version"]}</b></span></div>
+</div>
+<p class="sub">Already-starred repos filtered out, dead links checked live. FIT is resemblance
+to your starring behaviour, relative to your top hit. Not a quality verdict.</p>
 <div class="cols"><div>
-<p class="sub">{prof["n_stars_pulled"]} recent stars read, {len(prof["own_repos"])} own repos.
-Already-starred repos are filtered out, dead links checked live. Scores are relative
-to your top hit.</p>
 <div class="chips" id="chips"><button class="active" data-lo="0" data-hi="">all</button>
 <button data-lo="10000" data-hi="">10k+ ☆</button>
 <button data-lo="1000" data-hi="10000">1k to 10k</button>
-<button data-lo="0" data-hi="1000">under 1k, the gems</button></div>
+<button data-lo="0" data-hi="1000">under 1k · the gems</button></div>
 <div class="grid">{cards}</div>
 <button id="more">give me five more</button></div>
-<div><div class="panel"><h3>the dossier</h3><div class="langs">{langs}</div>
-<div id="dossier"></div></div></div></div>
+<div>
+<div class="panel"><h3><span class="live"></span> the dossier</h3><div class="langs">{langs}</div>
+<div id="dossier"></div></div>
+<div class="panel"><h3>the readout</h3><div class="rstat">
+recall@50 &nbsp;<b>{r50:.1f}%</b><br>trending &nbsp;<b>{p50:.2f}%</b><br>
+{prof["n_stars_pulled"]} stars read<br>{len(prof["own_repos"])} own repos<br>model v{state["model_version"]}
+</div></div></div></div>
 <script>
 const d=document.getElementById('dossier');
 const w=new WebSocket((location.protocol==='https:'?'wss':'ws')+'://'+location.host+
