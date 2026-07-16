@@ -470,22 +470,21 @@ border-radius:0;padding:9px 4px;margin-right:14px;font-weight:500;font-size:14px
 #librarian{max-width:740px;display:flex;flex-direction:column;
 height:calc(100vh - 210px);min-height:360px}
 .libintro{color:var(--dim);font-size:13.5px;margin:0 0 14px}
-#log{flex:1;overflow-y:auto;padding:14px 18px;font-size:14px;
-background:var(--panel);border:1px solid var(--line);border-radius:12px}
-#log .q{color:var(--gold);margin-top:14px;font-weight:600}
-#log .a{white-space:pre-wrap;color:#d8d3c8;line-height:1.6}
-#log .t{color:var(--faint);font-family:var(--mono);font-size:11.5px;margin:6px 0;
-display:inline-block;background:var(--bg2);border:1px solid var(--line);border-radius:6px;padding:2px 9px}
-.chatcards{display:flex;flex-direction:column;gap:6px;margin:10px 0}
-.ccard{display:flex;gap:12px;align-items:center;background:var(--bg2);border:1px solid var(--line);
-border-radius:8px;padding:9px 12px}
-.ccard img{width:76px;aspect-ratio:2/1;object-fit:cover;border-radius:5px;background:var(--bg);flex:none}
-.ccard .cc-body{min-width:0}
-.ccard .cc-nm{font-weight:600;font-size:13px}
-.ccard .cc-meta{color:var(--dim);font-size:11.5px;margin-top:1px;display:flex;gap:10px;align-items:center}
-.ccard .cc-pitch{color:#c9c4b9;font-size:12px;margin-top:2px;overflow:hidden;display:-webkit-box;
--webkit-line-clamp:2;-webkit-box-orient:vertical}
-#askform{display:flex;gap:8px;margin-top:12px}#askform input{flex:1}
+#log{flex:1;overflow-y:auto;padding:4px 2px;font-size:14px;
+display:flex;flex-direction:column;gap:12px}
+#log .q{color:var(--ink);background:var(--bg2);border:1px solid var(--line);border-radius:14px;
+padding:8px 14px;align-self:flex-end;max-width:82%}
+#log .a{white-space:pre-wrap;color:#d8d3c8;line-height:1.7;align-self:stretch}
+#log .t{color:var(--faint);font-family:var(--mono);font-size:11.5px;
+align-self:flex-start;background:var(--bg2);border:1px solid var(--line);border-radius:6px;padding:2px 9px}
+.rchip{display:inline-flex;align-items:center;gap:6px;background:var(--bg2);
+border:1px solid var(--line);border-radius:8px;padding:1px 9px;margin:1px 0;
+font-size:12.5px;font-weight:600;vertical-align:-2px;white-space:nowrap}
+.rchip:hover{border-color:var(--gold);text-decoration:none}
+.rchip .rc-stars{color:var(--dim);font-weight:400;font-size:11.5px}
+#askform{display:flex;gap:8px;margin-top:12px}
+#askform input{flex:1;border-radius:22px;padding-left:16px}
+#askform button{border-radius:22px}
 .err{color:var(--bad)}
 .chips{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 18px}
 .chips button{border-radius:20px;padding:5px 14px;font-weight:500;font-size:12.5px;color:var(--dim);
@@ -533,20 +532,25 @@ document.getElementById('askform').onsubmit=(e)=>{
     if(d.t==='tok'){ad.textContent+=d.d;log.scrollTop=log.scrollHeight}
     else if(d.t==='tool'){const t=document.createElement('div');t.className='t';
       t.textContent='consulting '+d.d;log.insertBefore(t,ad)}
-    else if(d.t==='cards'){const w=document.createElement('div');w.className='chatcards';
-      d.d.forEach(r=>{const c=document.createElement('div');c.className='ccard';
-        const dot=LANG_COLORS[r.language]||'#8b949e';
-        c.innerHTML='<a href="https://github.com/'+r.full_name+'" target="_blank" rel="noopener">'
-          +'<img loading="lazy" alt="" src="https://opengraph.githubassets.com/1/'+r.full_name+'"></a>'
-          +'<div class="cc-body"><div class="cc-nm"><a href="https://github.com/'+r.full_name
-          +'" target="_blank" rel="noopener"></a></div>'
-          +'<div class="cc-meta"><span>\\u2606 '+r.stars.toLocaleString()+'</span>'
-          +(r.language&&r.language!=='none'?'<span><span class="ldot" style="background:'+dot+'"></span>'+r.language+'</span>':'')
-          +'</div><div class="cc-pitch"></div></div>';
-        c.querySelector('.cc-nm a').textContent=r.full_name;
-        c.querySelector('.cc-pitch').textContent=r.pitch||'';
-        w.appendChild(c)});
-      log.appendChild(w);log.scrollTop=log.scrollHeight}
+    else if(d.t==='cards'){
+      const by={};d.d.forEach(r=>by[r.full_name.toLowerCase()]=r);
+      const names=d.d.map(r=>r.full_name.replace(/[.*+?^${}()|[\\]\\\\]/g,'\\\\$&'));
+      const rx=new RegExp('('+names.join('|')+')','gi');
+      const txt=ad.textContent.replace(/\\*\\*/g,'');
+      ad.textContent='';
+      txt.split(rx).forEach(part=>{
+        const r=by[(part||'').toLowerCase()];
+        if(r){const a=document.createElement('a');a.className='rchip';
+          a.href='https://github.com/'+r.full_name;a.target='_blank';a.rel='noopener';
+          a.title=r.pitch||'';
+          const dt=document.createElement('span');dt.className='ldot';
+          dt.style.background=LANG_COLORS[r.language]||'#8b949e';a.appendChild(dt);
+          a.appendChild(document.createTextNode(r.full_name));
+          const st=document.createElement('span');st.className='rc-stars';
+          st.textContent='\\u2606 '+r.stars.toLocaleString();a.appendChild(st);
+          ad.appendChild(a);}
+        else if(part)ad.appendChild(document.createTextNode(part));});
+      log.scrollTop=log.scrollHeight}
     else if(d.t==='end'){hist.push([q,ad.textContent]);ws.close()}};
 };
 """
